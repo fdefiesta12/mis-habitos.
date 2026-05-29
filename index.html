@@ -73,7 +73,8 @@ canvas#curve{width:100%;height:130px;display:block;margin-top:8px;}
 .habit-top{display:flex;align-items:center;gap:10px;margin-bottom:8px;}
 .habit-emoji{font-size:22px;flex-shrink:0;}
 .habit-info{flex:1;min-width:0;}
-.habit-name{font-size:15px;font-weight:500;color:var(--text);}
+.habit-name{font-size:15px;font-weight:500;color:var(--text);display:flex;align-items:center;gap:6px;}
+.weight-tag{font-size:10px;font-weight:600;padding:2px 6px;border-radius:4px;background:var(--bg2);color:var(--text2);}
 .habit-card.full .habit-name{color:var(--green-dark);}
 .habit-meta{font-size:11px;color:var(--text2);margin-top:3px;display:flex;gap:10px;}
 .habit-card.full .habit-meta{color:var(--green-mid);}
@@ -95,6 +96,10 @@ textarea.notes-area:focus{outline:none;border-color:var(--purple);}
 .emoji-picker{display:flex;gap:5px;flex-wrap:wrap;}
 .ep-btn{font-size:18px;padding:3px 5px;border-radius:7px;border:1.5px solid transparent;cursor:pointer;background:none;transition:all .12s;}
 .ep-btn.selected{border-color:var(--purple);background:var(--purple-light);}
+
+.setup-row{display:flex;gap:8px;align-items:center;}
+.weight-selector{font-size:13px;padding:9px;border-radius:var(--radius-sm);border:0.5px solid var(--border);background:var(--bg2);color:var(--text);font-family:inherit;cursor:pointer;}
+
 .add-row{display:flex;gap:8px;}
 .add-section input[type=text]{flex:1;font-size:14px;padding:9px 10px;border-radius:var(--radius-sm);border:0.5px solid var(--border);background:var(--bg2);color:var(--text);font-family:inherit;}
 .add-btn{padding:9px 16px;border-radius:var(--radius-sm);background:var(--purple);color:#fff;border:none;font-size:14px;cursor:pointer;font-family:inherit;font-weight:500;}
@@ -129,13 +134,13 @@ textarea.notes-area:focus{outline:none;border-color:var(--purple);}
   </div>
 
   <div class="card">
-    <div class="card-title">Esta semana</div>
+    <div class="card-title">Esta semana (Ponderado)</div>
     <div class="week-bars" id="week-bars"></div>
   </div>
 
   <div class="card">
     <div class="card-title">
-      <span>Curva PT4 (Acumulada) <strong id="chart-trend">0.00</strong></span>
+      <span>Curva PT4 Ponderada <strong id="chart-trend">0.00</strong></span>
       <div class="chart-filters">
         <button class="cf-btn active" id="btn-filter-W" onclick="setChartFilter('W')">W</button>
         <button class="cf-btn" id="btn-filter-M" onclick="setChartFilter('M')">M</button>
@@ -156,8 +161,13 @@ textarea.notes-area:focus{outline:none;border-color:var(--purple);}
   <div class="section-title" style="margin-top:1rem;">Agregar habito</div>
   <div class="add-section">
     <div class="emoji-picker" id="emoji-picker"></div>
-    <div class="add-row">
+    <div class="setup-row">
       <input type="text" id="habit-input" placeholder="Nombre del habito..." maxlength="40"/>
+      <select id="habit-weight" class="weight-selector">
+        <option value="1">Prioridad Baja (x1)</option>
+        <option value="2" selected>Prioridad Media (x2)</option>
+        <option value="3">Prioridad Alta (x3)</option>
+      </select>
       <button class="add-btn" onclick="addHabit()">Agregar</button>
     </div>
   </div>
@@ -182,9 +192,9 @@ function daysAgo(n){const d=new Date(todayDate);d.setDate(d.getDate()-n);return 
 function defaultState(){
   return {
     habits:[
-      {id:1,name:'Ejercicio',emoji:'💪',streak:0,bestStreak:0},
-      {id:2,name:'Leer 20 min',emoji:'📚',streak:0,bestStreak:0},
-      {id:3,name:'Tomar agua',emoji:'💧',streak:0,bestStreak:0},
+      {id:1,name:'Ejercicio',emoji:'💪',weight:2,streak:0,bestStreak:0},
+      {id:2,name:'Estudio GTO',emoji:'📚',weight:3,streak:0,bestStreak:0},
+      {id:3,name:'Tomar agua',emoji:'💧',weight:1,streak:0,bestStreak:0},
     ],
     dailyLog:{},notes:{},startDate:todayKey,lastDate:todayKey,nextId:10,streakDays:0,bestStreakDays:0
   };
@@ -194,16 +204,40 @@ function save(){try{localStorage.setItem('habits_v4',JSON.stringify(state));}cat
 
 let state=load()||defaultState();
 if(!state.notes)state.notes={};
+
+state.habits.forEach(h => { if(!h.weight) h.weight = 1; });
+
 if(!state.startDate) {
-  // Inicializar fecha de inicio basada en el historial existente o hoy
   const logs = Object.keys(state.dailyLog || {});
   state.startDate = logs.length ? logs.sort()[0] : todayKey;
 }
 
+// ==========================================
+// AUDITORÍA DE DÍAS PERDIDOS (SIT OUT PUNISH)
+// ==========================================
+function fillMissingDays() {
+  const start = new Date(state.startDate + 'T12:00:00');
+  const end = new Date(todayKey + 'T12:00:00');
+  let loop = new Date(start);
+  
+  let modified = false;
+  while (loop <= end) {
+    const dk = dateKey(loop);
+    // Si no existe el registro de ese día en absoluto, se fuerza a un objeto vacío (0% ponderado)
+    if (!state.dailyLog[dk]) {
+      state.dailyLog[dk] = {};
+      modified = true;
+    }
+    loop.setDate(loop.getDate() + 1);
+  }
+  if (modified) save();
+}
+fillMissingDays(); // Se ejecuta inmediatamente al cargar la app
+
+// Control de cambios de día tradicionales para manejo de rachas estables
 if(state.lastDate!==todayKey){
   const prev=state.dailyLog[state.lastDate]||{};
-  const avgs=state.habits.map(h=>prev[h.id]||0);
-  const dayAvg=avgs.length?avgs.reduce((a,b)=>a+b,0)/avgs.length:0;
+  const dayAvg=getDayAvg(state.lastDate);
   if(dayAvg>=50){state.streakDays=(state.streakDays||0)+1;state.bestStreakDays=Math.max(state.streakDays,state.bestStreakDays||0);}
   else{state.streakDays=0;}
   state.habits.forEach(h=>{
@@ -222,14 +256,23 @@ function setNote(hid,v){if(!state.notes[activeKey])state.notes[activeKey]={};sta
 function getWeekKeys(){const k=[];for(let i=6;i>=0;i--)k.push(dateKey(daysAgo(i)));return k;}
 
 function getDayAvg(dk){
+  if(!state.habits.length)return 0;
   const log=state.dailyLog[dk];
-  if(!log||!state.habits.length)return null;
-  const vals=state.habits.map(h=>log[h.id]||0);
-  if(vals.every(v=>v===0)&&dk!==todayKey)return null;
-  return Math.round(vals.reduce((a,b)=>a+b,0)/vals.length);
+  
+  let totalSum = 0;
+  let totalWeights = 0;
+  
+  state.habits.forEach(h => {
+    const pct = log ? (log[h.id] || 0) : 0;
+    totalSum += pct * h.weight;
+    totalWeights += h.weight;
+  });
+  
+  return totalWeights > 0 ? Math.round(totalSum / totalWeights) : 0;
 }
+
 function getWeekAvg(){
-  const avgs=getWeekKeys().map(k=>getDayAvg(k)).filter(v=>v!==null);
+  const avgs=getWeekKeys().map(k=>getDayAvg(k));
   return avgs.length?Math.round(avgs.reduce((a,b)=>a+b,0)/avgs.length):0;
 }
 
@@ -258,11 +301,11 @@ function buildWeekBars(){
   const wrap=document.getElementById('week-bars');wrap.innerHTML='';
   getWeekKeys().forEach(k=>{
     const d=new Date(k+'T12:00:00');
-    const avg=getDayAvg(k);const pct=avg===null?0:avg;
+    const pct=getDayAvg(k);
     const isSelected=k===activeKey;
     const fillColor=pct>=80?'#1D9E75':pct>=40?'#BA7517':'#534AB7';
     const bw=document.createElement('div');bw.className='week-bar-wrap';
-    bw.innerHTML=`<div class="week-bar-pct">${avg!==null?pct+'%':''}</div>
+    bw.innerHTML=`<div class="week-bar-pct">${pct}%</div>
       <div class="week-bar-bg"><div class="week-bar-fill" style="height:${pct}%;background:${isSelected?'#534AB7':fillColor};opacity:${isSelected?1:0.65};"></div></div>
       <div class="week-bar-label" style="font-weight:${isSelected?600:400};">${DAY_NAMES_SHORT[d.getDay()]}</div>`;
     wrap.appendChild(bw);
@@ -299,29 +342,22 @@ function buildCurve(){
   
   let currentProfit=0;
   const dataset=[0]; 
-  let hasData = false;
   
   keys.forEach(k=>{
-    const avg=getDayAvg(k);
-    if(avg !== null) {
-      const delta=(avg-50)*2; 
-      currentProfit+=delta;
-      dataset.push(currentProfit);
-      hasData = true;
-    } else {
-      dataset.push(currentProfit);
-    }
+    const avg=getDayAvg(k); 
+    const delta=(avg-50)*2; 
+    currentProfit+=delta;
+    dataset.push(currentProfit);
   });
 
   const minVal=Math.min(...dataset, 0);
   const maxVal=Math.max(...dataset, 0);
   const valRange=(maxVal-minVal)||10;
 
-  const pad={top:15,bottom:20,left:10,right:15};
+  const pad={top:15,bottom:20,left:15,right:15};
   const gw=W-pad.left-pad.right;const gh=H-pad.top-pad.bottom;
   const isDark=window.matchMedia('(prefers-color-scheme: dark)').matches;
   const gridColor=isDark?'rgba(255,255,255,0.06)':'rgba(0,0,0,0.06)';
-  const labelColor=isDark?'rgba(255,255,255,0.3)':'rgba(0,0,0,0.3)';
   
   ctx.clearRect(0,0,W,H);
 
@@ -339,12 +375,6 @@ function buildCurve(){
     ctx.strokeStyle=gridColor;ctx.lineWidth=0.5;
     ctx.beginPath();ctx.moveTo(pad.left,y);ctx.lineTo(W-pad.right,y);ctx.stroke();
   });
-
-  if(!hasData) {
-    ctx.font='11px sans-serif';ctx.fillStyle=labelColor;ctx.textAlign='center';
-    ctx.fillText('Marca habitos para ver la curva',W/2,H/2);ctx.textAlign='left';
-    return;
-  }
 
   ctx.beginPath();
   ctx.moveTo(ptX(0),ptY(dataset[0]));
@@ -376,12 +406,13 @@ function renderHabits(){
     const cls=pct>=100?'full':pct>=10?'partial':'';
     const weekPcts=getWeekKeys().map(k=>getPct(h.id,k));
     const weekAvg=Math.round(weekPcts.reduce((a,b)=>a+b,0)/weekPcts.length);
+    
     const card=document.createElement('div');card.className='habit-card '+cls;
     card.innerHTML=`
       <div class="habit-top">
         <span class="habit-emoji">${h.emoji}</span>
         <div class="habit-info">
-          <div class="habit-name">${h.name}</div>
+          <div class="habit-name">${h.name} <span class="weight-tag">x${h.weight}</span></div>
           <div class="habit-meta">
             <span><i class="ti ti-flame"></i> ${h.streak||0}d racha</span>
             <span><i class="ti ti-calendar"></i> ${weekAvg}% semana</span>
@@ -420,7 +451,7 @@ function toggleNotes(hid){
 
 function updateStats(){
   const vals=state.habits.map(h=>getPct(h.id));
-  const avg=vals.length?Math.round(vals.reduce((a,b)=>a+b,0)/vals.length):0;
+  const avg=getDayAvg(activeKey);
   document.getElementById('stat-avg').textContent=avg+'%';
   document.getElementById('stat-count').textContent=state.habits.length+(state.habits.length===1?' habito':' habitos');
   document.getElementById('stat-week').textContent=getWeekAvg()+'%';
@@ -433,7 +464,9 @@ function deleteHabit(id){state.habits=state.habits.filter(h=>h.id!==id);save();r
 
 function addHabit(){
   const input=document.getElementById('habit-input');const name=input.value.trim();if(!name)return;
-  state.habits.push({id:state.nextId++,name,emoji:selectedEmoji,streak:0,bestStreak:0});
+  const weightSelect=document.getElementById('habit-weight');
+  const weight=parseInt(weightSelect.value)||1;
+  state.habits.push({id:state.nextId++,name,emoji:selectedEmoji,weight,streak:0,bestStreak:0});
   input.value='';save();renderHabits();
 }
 
