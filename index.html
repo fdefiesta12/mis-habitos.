@@ -51,6 +51,10 @@ h1{font-size:20px;font-weight:600;color:var(--text);}
 .card{background:var(--bg);border:0.5px solid var(--border);border-radius:var(--radius);padding:12px 14px;margin-bottom:.75rem;}
 .card-title{font-size:12px;color:var(--text2);margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;}
 
+.chart-filters{display:flex;gap:4px;background:var(--bg2);padding:2px;border-radius:6px;}
+.cf-btn{background:none;border:none;padding:3px 8px;font-size:11px;font-weight:500;color:var(--text2);cursor:pointer;border-radius:4px;transition:all .1s;}
+.cf-btn.active{background:var(--bg);color:var(--text);box-shadow:0 1px 2px rgba(0,0,0,0.05);}
+
 .week-bars{display:flex;align-items:flex-end;gap:5px;height:64px;}
 .week-bar-wrap{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;height:100%;}
 .week-bar-bg{flex:1;width:100%;background:var(--bg2);border-radius:4px;position:relative;overflow:hidden;}
@@ -58,7 +62,7 @@ h1{font-size:20px;font-weight:600;color:var(--text);}
 .week-bar-label{font-size:9px;color:var(--text2);}
 .week-bar-pct{font-size:9px;color:var(--text2);font-weight:500;min-height:12px;}
 
-canvas#curve{width:100%;height:100px;display:block;}
+canvas#curve{width:100%;height:130px;display:block;margin-top:8px;}
 
 .section-title{font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;}
 .habits-list{display:flex;flex-direction:column;gap:8px;margin-bottom:1rem;}
@@ -72,7 +76,6 @@ canvas#curve{width:100%;height:100px;display:block;}
 .habit-name{font-size:15px;font-weight:500;color:var(--text);}
 .habit-card.full .habit-name{color:var(--green-dark);}
 .habit-meta{font-size:11px;color:var(--text2);margin-top:3px;display:flex;gap:10px;}
-.habit-card.full .habit-meta{color:var(--green-mid);}
 .pct-badge{font-size:14px;font-weight:600;min-width:38px;text-align:right;color:var(--text2);}
 .habit-card.full .pct-badge{color:var(--green);}
 .habit-card.partial .pct-badge{color:var(--amber);}
@@ -130,7 +133,14 @@ textarea.notes-area:focus{outline:none;border-color:var(--purple);}
   </div>
 
   <div class="card">
-    <div class="card-title">Curva de rendimiento <span id="chart-trend" style="font-size:11px;"></span></div>
+    <div class="card-title">
+      <span>Curva PT4 (Acumulada) <strong id="chart-trend">0.00</strong></span>
+      <div class="chart-filters">
+        <button class="cf-btn active" onclick="setChartFilter('W')">W</button>
+        <button class="cf-btn" onclick="setChartFilter('M')">M</button>
+        <button class="cf-btn" onclick="setChartFilter('ALL')">ALL</button>
+      </div>
+    </div>
     <canvas id="curve"></canvas>
   </div>
 
@@ -159,7 +169,8 @@ const EMOJIS=['💪','📚','💧','🏃','🧘','🥗','😴','✍️','🎯','
 let selectedEmoji='💪';
 const todayDate=new Date();
 const todayKey=todayDate.toISOString().slice(0,10);
-let activeKey=todayKey; // Variable clave para rastrear el día seleccionado
+let activeKey=todayKey;
+let chartFilter='W'; // 'W', 'M', 'ALL'
 
 const DAY_NAMES_SHORT=['Dom','Lun','Mar','Mie','Jue','Vie','Sab'];
 const DAY_NAMES=['domingo','lunes','martes','miercoles','jueves','viernes','sabado'];
@@ -170,18 +181,19 @@ function daysAgo(n){const d=new Date(todayDate);d.setDate(d.getDate()-n);return 
 function defaultState(){
   return {
     habits:[
-      {id:1,name:'Ejercicio',emoji:'💪',streak:0,bestStreak:0},
-      {id:2,name:'Leer 20 min',emoji:'📚',streak:0,bestStreak:0},
-      {id:3,name:'Tomar agua',emoji:'💧',streak:0,bestStreak:0},
+      {id:1,name:'Ejercicio',emoji:'💪'},
+      {id:2,name:'Leer 20 min',emoji:'📚'},
+      {id:3,name:'Tomar agua',emoji:'💧'},
     ],
-    dailyLog:{},notes:{},lastDate:todayKey,nextId:10,streakDays:0,bestStreakDays:0
+    dailyLog:{},notes:{},startDate:todayKey,nextId:10,streakDays:0
   };
 }
-function load(){try{const s=localStorage.getItem('habits_v5');return s?JSON.parse(s):null;}catch{return null;}}
-function save(){try{localStorage.setItem('habits_v5',JSON.stringify(state));}catch{}}
+function load(){try{const s=localStorage.getItem('habits_v6');return s?JSON.parse(s):null;}catch{return null;}}
+function save(){try{localStorage.setItem('habits_v6',JSON.stringify(state));}catch{}}
 
 let state=load()||defaultState();
 if(!state.notes)state.notes={};
+if(!state.startDate)state.startDate=todayKey;
 if(!state.dailyLog[todayKey])state.dailyLog[todayKey]={};
 
 function getPct(hid,dk){return(state.dailyLog[dk||activeKey]||{})[hid]||0;}
@@ -192,13 +204,12 @@ function getWeekKeys(){const k=[];for(let i=6;i>=0;i--)k.push(dateKey(daysAgo(i)
 
 function getDayAvg(dk){
   const log=state.dailyLog[dk];
-  if(!log||!state.habits.length)return null;
+  if(!log||!state.habits.length)return 0;
   const vals=state.habits.map(h=>log[h.id]||0);
-  if(vals.every(v=>v===0)&&dk!==todayKey)return null;
   return Math.round(vals.reduce((a,b)=>a+b,0)/vals.length);
 }
 function getWeekAvg(){
-  const avgs=getWeekKeys().map(k=>getDayAvg(k)).filter(v=>v!==null);
+  const avgs=getWeekKeys().map(k=>getDayAvg(k));
   return avgs.length?Math.round(avgs.reduce((a,b)=>a+b,0)/avgs.length):0;
 }
 
@@ -210,17 +221,13 @@ function buildDateStrip(){
     const p=document.createElement('div');
     p.className='date-pill'+(dk===activeKey?' active':'');
     p.innerHTML=`<span class="dn">${DAY_NAMES_SHORT[d.getDay()]}</span><span class="dd">${d.getDate()}</span>`;
-    
-    // Al hacer clic, cambia el día activo y refresca la app
     p.onclick=()=>{
       activeKey=dk;
       document.querySelectorAll('.date-pill').forEach(b=>b.classList.remove('active'));
       p.classList.add('active');
-      
       const label=dk===todayKey?'hoy':`${d.getDate()} de ${MONTHS[d.getMonth()]}`;
       document.getElementById('avg-title').textContent=`Promedio ${dk===todayKey?'hoy':DAY_NAMES_SHORT[d.getDay()]}`;
       document.getElementById('list-title').textContent=`Habitos (${label})`;
-      
       renderHabits();
     };
     strip.appendChild(p);
@@ -231,68 +238,111 @@ function buildWeekBars(){
   const wrap=document.getElementById('week-bars');wrap.innerHTML='';
   getWeekKeys().forEach(k=>{
     const d=new Date(k+'T12:00:00');
-    const avg=getDayAvg(k);const pct=avg===null?0:avg;
+    const pct=getDayAvg(k);
     const isSelected=k===activeKey;
-    const fillColor=pct>=80?'#1D9E75':pct>=40?'#BA7517':'#534AB7';
+    const fillColor=pct dishonesty=pct>=80?'#1D9E75':pct>=40?'#BA7517':'#534AB7';
     const bw=document.createElement('div');bw.className='week-bar-wrap';
-    bw.innerHTML=`<div class="week-bar-pct">${avg!==null?pct+'%':''}</div>
+    bw.innerHTML=`<div class="week-bar-pct">${pct}%</div>
       <div class="week-bar-bg"><div class="week-bar-fill" style="height:${pct}%;background:${isSelected?'#534AB7':fillColor};opacity:${isSelected?1:0.65};"></div></div>
       <div class="week-bar-label" style="font-weight:${isSelected?600:400};">${DAY_NAMES_SHORT[d.getDay()]}</div>`;
     wrap.appendChild(bw);
   });
 }
 
+function setChartFilter(f){
+  chartFilter=f;
+  document.querySelectorAll('.cf-btn').forEach(b=>b.classList.remove('active'));
+  event.target.classList.add('active');
+  buildCurve();
+}
+
 function buildCurve(){
   const canvas=document.getElementById('curve');
   const dpr=window.devicePixelRatio||1;
-  const W=canvas.offsetWidth||300;const H=100;
+  const W=canvas.offsetWidth||300;const H=130;
   canvas.width=W*dpr;canvas.height=H*dpr;
   canvas.style.width=W+'px';canvas.style.height=H+'px';
   const ctx=canvas.getContext('2d');ctx.scale(dpr,dpr);
-  const keys=[];for(let i=29;i>=0;i--)keys.push(dateKey(daysAgo(i)));
-  const rawPoints=keys.map(k=>getDayAvg(k));
-  let running=50;const points=[];
-  rawPoints.forEach(v=>{if(v===null){points.push(null);return;}running=Math.max(5,Math.min(95,running+(v-50)*0.6));points.push(running);});
-  const valid=points.filter(p=>p!==null);
-  const pad={top:8,bottom:16,left:6,right:6};
+
+  // Determinar cuántos días mapear según el filtro del PokerTracker
+  let numDays=7;
+  if(chartFilter==='M') numDays=30;
+  else if(chartFilter==='ALL'){
+    const start=new Date(state.startDate+'T12:00:00');
+    const diffTime=Math.abs(todayDate-start);
+    numDays=Math.max(7, Math.ceil(diffTime/(1000*60*60*24))+1);
+  }
+
+  // Construir serie temporal de promedios diarios
+  const keys=[];
+  for(let i=numDays-1;i>=0;i--) keys.push(dateKey(daysAgo(i)));
+  
+  // Calcular la curva acumulada exacta tipo ganancia/pérdida de fichas
+  let currentProfit=0;
+  const dataset=[0]; // Empieza en la base cero del gráfico
+  
+  keys.forEach(k=>{
+    const avg=getDayAvg(k);
+    // Lógica del balance: >50% suma equity, <50% resta saldo (downswing de disciplina)
+    const delta=(avg-50)*2; 
+    currentProfit+=delta;
+    dataset.push(currentProfit);
+  });
+
+  const minVal=Math.min(...dataset, 0);
+  const maxVal=Math.max(...dataset, 0);
+  const valRange=(maxVal-minVal)||10;
+
+  const pad={top:15,bottom:20,left:10,right:15};
   const gw=W-pad.left-pad.right;const gh=H-pad.top-pad.bottom;
   const isDark=window.matchMedia('(prefers-color-scheme: dark)').matches;
   const gridColor=isDark?'rgba(255,255,255,0.06)':'rgba(0,0,0,0.06)';
   const labelColor=isDark?'rgba(255,255,255,0.3)':'rgba(0,0,0,0.3)';
+  
   ctx.clearRect(0,0,W,H);
-  [25,50,75].forEach(pct=>{
-    const y=pad.top+gh-(pct/100)*gh;
-    ctx.strokeStyle=gridColor;ctx.lineWidth=0.5;ctx.setLineDash([3,3]);
+
+  // Mapear coordenadas
+  const ptX=idx=>pad.left+(idx*(gw/(dataset.length-1)));
+  const ptY=val=>pad.top+gh-((val-minVal)/valRange)*gh;
+
+  // Dibujar línea base cero (El break-even del gráfico de poker)
+  const yZero=ptY(0);
+  ctx.strokeStyle=isDark?'rgba(255,255,255,0.15)':'rgba(0,0,0,0.15)';
+  ctx.lineWidth=1;ctx.setLineDash([4,4]);
+  ctx.beginPath();ctx.moveTo(pad.left,yZero);ctx.lineTo(W-pad.right,yZero);ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Dibujar cuadrícula de fondo estilo software
+  [0.25,0.5,0.75].forEach(ratio=>{
+    const y=pad.top+gh*ratio;
+    ctx.strokeStyle=gridColor;ctx.lineWidth=0.5;
     ctx.beginPath();ctx.moveTo(pad.left,y);ctx.lineTo(W-pad.right,y);ctx.stroke();
-    ctx.setLineDash([]);ctx.font='9px sans-serif';ctx.fillStyle=labelColor;ctx.fillText(pct+'%',2,y+3);
   });
-  if(!valid.length){
-    ctx.font='11px sans-serif';ctx.fillStyle=labelColor;ctx.textAlign='center';
-    ctx.fillText('Marca habitos para ver la curva',W/2,H/2);ctx.textAlign='left';return;
+
+  // Dibujar la línea de la curva de rendimiento
+  ctx.beginPath();
+  ctx.moveTo(ptX(0),ptY(dataset[0]));
+  for(let i=1;i<dataset.length;i++){
+    ctx.lineTo(ptX(i),ptY(dataset[i]));
   }
-  const step=gw/(points.length-1);
-  const ptX=i=>pad.left+i*step;const ptY=v=>pad.top+gh-(v/100)*gh;
-  const lastVal=valid[valid.length-1];const firstVal=valid[0];
-  const lineColor=lastVal>=firstVal?'#1D9E75':'#E24B4A';
-  const fillClr=lastVal>=firstVal?'rgba(29,158,117,0.08)':'rgba(226,75,74,0.07)';
-  const segs=[];let seg=[];
-  points.forEach((p,i)=>{if(p!==null){seg.push({i,v:p});}else{if(seg.length)segs.push(seg);seg=[];}});
-  if(seg.length)segs.push(seg);
-  segs.forEach(seg=>{
-    if(seg.length<2)return;
-    ctx.beginPath();ctx.moveTo(ptX(seg[seg.length-1].i),ptY(seg[seg.length-1].v));
-    for(let k=seg.length-2;k>=0;k--){const c=seg[k],nx=seg[k+1];const cpx=(ptX(c.i)+ptX(nx.i))/2;ctx.bezierCurveTo(cpx,ptY(nx.v),cpx,ptY(c.v),ptX(c.i),ptY(c.v));}
-    ctx.lineTo(ptX(seg[0].i),H-pad.bottom);ctx.lineTo(ptX(seg[seg.length-1].i),H-pad.bottom);
-    ctx.closePath();ctx.fillStyle=fillClr;ctx.fill();
-    ctx.beginPath();ctx.moveTo(ptX(seg[0].i),ptY(seg[0].v));
-    for(let k=1;k<seg.length;k++){const pv=seg[k-1],c=seg[k];const cpx=(ptX(pv.i)+ptX(c.i))/2;ctx.bezierCurveTo(cpx,ptY(pv.v),cpx,ptY(c.v),ptX(c.i),ptY(c.v));}
-    ctx.strokeStyle=lineColor;ctx.lineWidth=2;ctx.stroke();
-  });
-  const ls=segs[segs.length-1];
-  if(ls&&ls.length){const lp=ls[ls.length-1];ctx.beginPath();ctx.arc(ptX(lp.i),ptY(lp.v),4,0,Math.PI*2);ctx.fillStyle=lineColor;ctx.fill();ctx.strokeStyle=isDark?'#1a1a1e':'#fff';ctx.lineWidth=1.5;ctx.stroke();}
-  const trend=valid.length>=2?valid[valid.length-1]-valid[0]:0;
-  const tel=document.getElementById('chart-trend');
-  if(tel){tel.textContent=trend>0?'↑ subiendo':trend<0?'↓ bajando':'→ estable';tel.style.color=trend>=0?'#1D9E75':'#E24B4A';}
+  
+  const finalProfit=dataset[dataset.length-1];
+  const lineColor=finalProfit>=0?'#1D9E75':'#E24B4A';
+  ctx.strokeStyle=lineColor;ctx.lineWidth=2.5;ctx.stroke();
+
+  // Marcar el punto final actual
+  const lastX=ptX(dataset.length-1);
+  const lastY=ptY(finalProfit);
+  ctx.beginPath();ctx.arc(lastX,lastY,4,0,Math.PI*2);
+  ctx.fillStyle=lineColor;ctx.fill();
+  ctx.strokeStyle=isDark?'#1c1c1e':'#fff';ctx.lineWidth=1.5;ctx.stroke();
+
+  // Actualizar el número de la banca o balance de hábitos arriba
+  const trendEl=document.getElementById('chart-trend');
+  if(trendEl){
+    trendEl.textContent=(finalProfit>=0?'+':'')+Math.round(finalProfit);
+    trendEl.style.color=finalProfit>=0?'#1D9E75':'#E24B4A';
+  }
 }
 
 function renderHabits(){
@@ -300,17 +350,12 @@ function renderHabits(){
   state.habits.forEach(h=>{
     const pct=getPct(h.id);const note=getNote(h.id);
     const cls=pct>=100?'full':pct>=10?'partial':'';
-    const weekPcts=getWeekKeys().map(k=>getPct(h.id,k));
-    const weekAvg=Math.round(weekPcts.reduce((a,b)=>a+b,0)/weekPcts.length);
     const card=document.createElement('div');card.className='habit-card '+cls;
     card.innerHTML=`
       <div class="habit-top">
         <span class="habit-emoji">${h.emoji}</span>
         <div class="habit-info">
           <div class="habit-name">${h.name}</div>
-          <div class="habit-meta">
-            <span>💻 Sem: ${weekAvg}%</span>
-          </div>
         </div>
         <span class="pct-badge" id="badge-${h.id}">${pct}%</span>
         <button class="del-btn" onclick="deleteHabit(${h.id})">✕</button>
@@ -350,7 +395,6 @@ function updateStats(){
   document.getElementById('stat-count').textContent=state.habits.length+(state.habits.length===1?' habito':' habitos');
   document.getElementById('stat-week').textContent=getWeekAvg()+'%';
   
-  // Calcular racha general basada en los dias que tienen promedio >= 50%
   let totalStreak=0;
   for(let i=0; i<30; i++) {
     const k = dateKey(daysAgo(i));
@@ -359,7 +403,6 @@ function updateStats(){
     else if(k !== todayKey) break; 
   }
   document.getElementById('stat-streak').textContent='Racha: '+totalStreak+' dias';
-  
   const all100=vals.length>0&&vals.every(v=>v>=100);
   document.getElementById('congrats-box').style.display=all100?'block':'none';
 }
@@ -368,7 +411,7 @@ function deleteHabit(id){state.habits=state.habits.filter(h=>h.id!==id);save();r
 
 function addHabit(){
   const input=document.getElementById('habit-input');const name=input.value.trim();if(!name)return;
-  state.habits.push({id:state.nextId++,name,emoji:selectedEmoji,streak:0,bestStreak:0});
+  state.habits.push({id:state.nextId++,name,emoji:selectedEmoji});
   input.value='';save();renderHabits();
 }
 
