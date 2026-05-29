@@ -136,9 +136,9 @@ textarea.notes-area:focus{outline:none;border-color:var(--purple);}
     <div class="card-title">
       <span>Curva PT4 (Acumulada) <strong id="chart-trend">0.00</strong></span>
       <div class="chart-filters">
-        <button class="cf-btn active" onclick="setChartFilter('W')">W</button>
-        <button class="cf-btn" onclick="setChartFilter('M')">M</button>
-        <button class="cf-btn" onclick="setChartFilter('ALL')">ALL</button>
+        <button class="cf-btn active" id="btn-filter-W" onclick="setChartFilter('W')">W</button>
+        <button class="cf-btn" id="btn-filter-M" onclick="setChartFilter('M')">M</button>
+        <button class="cf-btn" id="btn-filter-ALL" onclick="setChartFilter('ALL')">ALL</button>
       </div>
     </div>
     <canvas id="curve"></canvas>
@@ -170,7 +170,7 @@ let selectedEmoji='💪';
 const todayDate=new Date();
 const todayKey=todayDate.toISOString().slice(0,10);
 let activeKey=todayKey;
-let chartFilter='W'; // 'W', 'M', 'ALL'
+let chartFilter='W'; 
 
 const DAY_NAMES_SHORT=['Dom','Lun','Mar','Mie','Jue','Vie','Sab'];
 const DAY_NAMES=['domingo','lunes','martes','miercoles','jueves','viernes','sabado'];
@@ -227,7 +227,7 @@ function buildDateStrip(){
       p.classList.add('active');
       const label=dk===todayKey?'hoy':`${d.getDate()} de ${MONTHS[d.getMonth()]}`;
       document.getElementById('avg-title').textContent=`Promedio ${dk===todayKey?'hoy':DAY_NAMES_SHORT[d.getDay()]}`;
-      document.getElementById('list-title').textContent=`Habitos (${label})`;
+      document.getElementById('list-title').textContent=\`Habitos (\${label})\`;
       renderHabits();
     };
     strip.appendChild(p);
@@ -240,7 +240,7 @@ function buildWeekBars(){
     const d=new Date(k+'T12:00:00');
     const pct=getDayAvg(k);
     const isSelected=k===activeKey;
-    const fillColor=pct dishonesty=pct>=80?'#1D9E75':pct>=40?'#BA7517':'#534AB7';
+    const fillColor=pct>=80?'#1D9E75':pct>=40?'#BA7517':'#534AB7';
     const bw=document.createElement('div');bw.className='week-bar-wrap';
     bw.innerHTML=`<div class="week-bar-pct">${pct}%</div>
       <div class="week-bar-bg"><div class="week-bar-fill" style="height:${pct}%;background:${isSelected?'#534AB7':fillColor};opacity:${isSelected?1:0.65};"></div></div>
@@ -252,19 +252,20 @@ function buildWeekBars(){
 function setChartFilter(f){
   chartFilter=f;
   document.querySelectorAll('.cf-btn').forEach(b=>b.classList.remove('active'));
-  event.target.classList.add('active');
+  const btn = document.getElementById('btn-filter-' + f);
+  if(btn) btn.classList.add('active');
   buildCurve();
 }
 
 function buildCurve(){
   const canvas=document.getElementById('curve');
+  if(!canvas) return;
   const dpr=window.devicePixelRatio||1;
   const W=canvas.offsetWidth||300;const H=130;
   canvas.width=W*dpr;canvas.height=H*dpr;
   canvas.style.width=W+'px';canvas.style.height=H+'px';
   const ctx=canvas.getContext('2d');ctx.scale(dpr,dpr);
 
-  // Determinar cuántos días mapear según el filtro del PokerTracker
   let numDays=7;
   if(chartFilter==='M') numDays=30;
   else if(chartFilter==='ALL'){
@@ -273,17 +274,14 @@ function buildCurve(){
     numDays=Math.max(7, Math.ceil(diffTime/(1000*60*60*24))+1);
   }
 
-  // Construir serie temporal de promedios diarios
   const keys=[];
   for(let i=numDays-1;i>=0;i--) keys.push(dateKey(daysAgo(i)));
   
-  // Calcular la curva acumulada exacta tipo ganancia/pérdida de fichas
   let currentProfit=0;
-  const dataset=[0]; // Empieza en la base cero del gráfico
+  const dataset=[0]; 
   
   keys.forEach(k=>{
     const avg=getDayAvg(k);
-    // Lógica del balance: >50% suma equity, <50% resta saldo (downswing de disciplina)
     const delta=(avg-50)*2; 
     currentProfit+=delta;
     dataset.push(currentProfit);
@@ -301,25 +299,21 @@ function buildCurve(){
   
   ctx.clearRect(0,0,W,H);
 
-  // Mapear coordenadas
   const ptX=idx=>pad.left+(idx*(gw/(dataset.length-1)));
   const ptY=val=>pad.top+gh-((val-minVal)/valRange)*gh;
 
-  // Dibujar línea base cero (El break-even del gráfico de poker)
   const yZero=ptY(0);
   ctx.strokeStyle=isDark?'rgba(255,255,255,0.15)':'rgba(0,0,0,0.15)';
   ctx.lineWidth=1;ctx.setLineDash([4,4]);
   ctx.beginPath();ctx.moveTo(pad.left,yZero);ctx.lineTo(W-pad.right,yZero);ctx.stroke();
   ctx.setLineDash([]);
 
-  // Dibujar cuadrícula de fondo estilo software
   [0.25,0.5,0.75].forEach(ratio=>{
     const y=pad.top+gh*ratio;
     ctx.strokeStyle=gridColor;ctx.lineWidth=0.5;
     ctx.beginPath();ctx.moveTo(pad.left,y);ctx.lineTo(W-pad.right,y);ctx.stroke();
   });
 
-  // Dibujar la línea de la curva de rendimiento
   ctx.beginPath();
   ctx.moveTo(ptX(0),ptY(dataset[0]));
   for(let i=1;i<dataset.length;i++){
@@ -330,14 +324,12 @@ function buildCurve(){
   const lineColor=finalProfit>=0?'#1D9E75':'#E24B4A';
   ctx.strokeStyle=lineColor;ctx.lineWidth=2.5;ctx.stroke();
 
-  // Marcar el punto final actual
   const lastX=ptX(dataset.length-1);
   const lastY=ptY(finalProfit);
   ctx.beginPath();ctx.arc(lastX,lastY,4,0,Math.PI*2);
   ctx.fillStyle=lineColor;ctx.fill();
   ctx.strokeStyle=isDark?'#1c1c1e':'#fff';ctx.lineWidth=1.5;ctx.stroke();
 
-  // Actualizar el número de la banca o balance de hábitos arriba
   const trendEl=document.getElementById('chart-trend');
   if(trendEl){
     trendEl.textContent=(finalProfit>=0?'+':'')+Math.round(finalProfit);
