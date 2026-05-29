@@ -68,14 +68,15 @@ canvas#curve{width:100%;height:130px;display:block;margin-top:8px;}
 .habits-list{display:flex;flex-direction:column;gap:8px;margin-bottom:1rem;}
 
 .habit-card{background:var(--bg);border:0.5px solid var(--border);border-radius:var(--radius);padding:12px 14px;transition:border-color .2s,background .2s;}
-.habit-card.full {border-color:var(--green) !important;background:var(--green-light) !important;}
-.habit-card.partial {border-color:var(--amber) !important;}
+.habit-card.full{border-color:var(--green);background:var(--green-light);}
+.habit-card.partial{border-color:var(--amber);}
 .habit-top{display:flex;align-items:center;gap:10px;margin-bottom:8px;}
 .habit-emoji{font-size:22px;flex-shrink:0;}
 .habit-info{flex:1;min-width:0;}
 .habit-name{font-size:15px;font-weight:500;color:var(--text);}
 .habit-card.full .habit-name{color:var(--green-dark);}
 .habit-meta{font-size:11px;color:var(--text2);margin-top:3px;display:flex;gap:10px;}
+.habit-card.full .habit-meta{color:var(--green-mid);}
 .pct-badge{font-size:14px;font-weight:600;min-width:38px;text-align:right;color:var(--text2);}
 .habit-card.full .pct-badge{color:var(--green);}
 .habit-card.partial .pct-badge{color:var(--amber);}
@@ -146,7 +147,7 @@ textarea.notes-area:focus{outline:none;border-color:var(--purple);}
 
   <div id="congrats-box" class="congrats">
     <div class="big">🔥</div>
-    <p>100% en todo este día!</p>
+    <p>100% en todo hoy! Eso es una racha!</p>
   </div>
 
   <div class="section-title" id="list-title">Mis habitos</div>
@@ -181,19 +182,37 @@ function daysAgo(n){const d=new Date(todayDate);d.setDate(d.getDate()-n);return 
 function defaultState(){
   return {
     habits:[
-      {id:1,name:'Ejercicio',emoji:'💪'},
-      {id:2,name:'Leer 20 min',emoji:'📚'},
-      {id:3,name:'Tomar agua',emoji:'💧'},
+      {id:1,name:'Ejercicio',emoji:'💪',streak:0,bestStreak:0},
+      {id:2,name:'Leer 20 min',emoji:'📚',streak:0,bestStreak:0},
+      {id:3,name:'Tomar agua',emoji:'💧',streak:0,bestStreak:0},
     ],
-    dailyLog:{},notes:{},startDate:todayKey,nextId:10,streakDays:0
+    dailyLog:{},notes:{},startDate:todayKey,lastDate:todayKey,nextId:10,streakDays:0,bestStreakDays:0
   };
 }
-function load(){try{const s=localStorage.getItem('habits_v6');return s?JSON.parse(s):null;}catch{return null;}}
-function save(){try{localStorage.setItem('habits_v6',JSON.stringify(state));}catch{}}
+function load(){try{const s=localStorage.getItem('habits_v4');return s?JSON.parse(s):null;}catch{return null;}}
+function save(){try{localStorage.setItem('habits_v4',JSON.stringify(state));}catch{}}
 
 let state=load()||defaultState();
 if(!state.notes)state.notes={};
-if(!state.startDate)state.startDate=todayKey;
+if(!state.startDate) {
+  // Inicializar fecha de inicio basada en el historial existente o hoy
+  const logs = Object.keys(state.dailyLog || {});
+  state.startDate = logs.length ? logs.sort()[0] : todayKey;
+}
+
+if(state.lastDate!==todayKey){
+  const prev=state.dailyLog[state.lastDate]||{};
+  const avgs=state.habits.map(h=>prev[h.id]||0);
+  const dayAvg=avgs.length?avgs.reduce((a,b)=>a+b,0)/avgs.length:0;
+  if(dayAvg>=50){state.streakDays=(state.streakDays||0)+1;state.bestStreakDays=Math.max(state.streakDays,state.bestStreakDays||0);}
+  else{state.streakDays=0;}
+  state.habits.forEach(h=>{
+    const p=prev[h.id]||0;
+    if(p>=100){h.streak=(h.streak||0)+1;h.bestStreak=Math.max(h.streak,h.bestStreak||0);}
+    else h.streak=0;
+  });
+  state.lastDate=todayKey;save();
+}
 if(!state.dailyLog[todayKey])state.dailyLog[todayKey]={};
 
 function getPct(hid,dk){return(state.dailyLog[dk||activeKey]||{})[hid]||0;}
@@ -204,12 +223,13 @@ function getWeekKeys(){const k=[];for(let i=6;i>=0;i--)k.push(dateKey(daysAgo(i)
 
 function getDayAvg(dk){
   const log=state.dailyLog[dk];
-  if(!log||!state.habits.length)return 0;
+  if(!log||!state.habits.length)return null;
   const vals=state.habits.map(h=>log[h.id]||0);
+  if(vals.every(v=>v===0)&&dk!==todayKey)return null;
   return Math.round(vals.reduce((a,b)=>a+b,0)/vals.length);
 }
 function getWeekAvg(){
-  const avgs=getWeekKeys().map(k=>getDayAvg(k));
+  const avgs=getWeekKeys().map(k=>getDayAvg(k)).filter(v=>v!==null);
   return avgs.length?Math.round(avgs.reduce((a,b)=>a+b,0)/avgs.length):0;
 }
 
@@ -227,7 +247,7 @@ function buildDateStrip(){
       p.classList.add('active');
       const label=dk===todayKey?'hoy':`${d.getDate()} de ${MONTHS[d.getMonth()]}`;
       document.getElementById('avg-title').textContent=`Promedio ${dk===todayKey?'hoy':DAY_NAMES_SHORT[d.getDay()]}`;
-      document.getElementById('list-title').textContent=\`Habitos (\${label})\`;
+      document.getElementById('list-title').textContent=`Habitos (${label})`;
       renderHabits();
     };
     strip.appendChild(p);
@@ -238,11 +258,11 @@ function buildWeekBars(){
   const wrap=document.getElementById('week-bars');wrap.innerHTML='';
   getWeekKeys().forEach(k=>{
     const d=new Date(k+'T12:00:00');
-    const pct=getDayAvg(k);
+    const avg=getDayAvg(k);const pct=avg===null?0:avg;
     const isSelected=k===activeKey;
     const fillColor=pct>=80?'#1D9E75':pct>=40?'#BA7517':'#534AB7';
     const bw=document.createElement('div');bw.className='week-bar-wrap';
-    bw.innerHTML=`<div class="week-bar-pct">${pct}%</div>
+    bw.innerHTML=`<div class="week-bar-pct">${avg!==null?pct+'%':''}</div>
       <div class="week-bar-bg"><div class="week-bar-fill" style="height:${pct}%;background:${isSelected?'#534AB7':fillColor};opacity:${isSelected?1:0.65};"></div></div>
       <div class="week-bar-label" style="font-weight:${isSelected?600:400};">${DAY_NAMES_SHORT[d.getDay()]}</div>`;
     wrap.appendChild(bw);
@@ -279,12 +299,18 @@ function buildCurve(){
   
   let currentProfit=0;
   const dataset=[0]; 
+  let hasData = false;
   
   keys.forEach(k=>{
     const avg=getDayAvg(k);
-    const delta=(avg-50)*2; 
-    currentProfit+=delta;
-    dataset.push(currentProfit);
+    if(avg !== null) {
+      const delta=(avg-50)*2; 
+      currentProfit+=delta;
+      dataset.push(currentProfit);
+      hasData = true;
+    } else {
+      dataset.push(currentProfit);
+    }
   });
 
   const minVal=Math.min(...dataset, 0);
@@ -314,6 +340,12 @@ function buildCurve(){
     ctx.beginPath();ctx.moveTo(pad.left,y);ctx.lineTo(W-pad.right,y);ctx.stroke();
   });
 
+  if(!hasData) {
+    ctx.font='11px sans-serif';ctx.fillStyle=labelColor;ctx.textAlign='center';
+    ctx.fillText('Marca habitos para ver la curva',W/2,H/2);ctx.textAlign='left';
+    return;
+  }
+
   ctx.beginPath();
   ctx.moveTo(ptX(0),ptY(dataset[0]));
   for(let i=1;i<dataset.length;i++){
@@ -342,24 +374,30 @@ function renderHabits(){
   state.habits.forEach(h=>{
     const pct=getPct(h.id);const note=getNote(h.id);
     const cls=pct>=100?'full':pct>=10?'partial':'';
+    const weekPcts=getWeekKeys().map(k=>getPct(h.id,k));
+    const weekAvg=Math.round(weekPcts.reduce((a,b)=>a+b,0)/weekPcts.length);
     const card=document.createElement('div');card.className='habit-card '+cls;
     card.innerHTML=`
       <div class="habit-top">
         <span class="habit-emoji">${h.emoji}</span>
         <div class="habit-info">
           <div class="habit-name">${h.name}</div>
+          <div class="habit-meta">
+            <span><i class="ti ti-flame"></i> ${h.streak||0}d racha</span>
+            <span><i class="ti ti-calendar"></i> ${weekAvg}% semana</span>
+          </div>
         </div>
         <span class="pct-badge" id="badge-${h.id}">${pct}%</span>
-        <button class="del-btn" onclick="deleteHabit(${h.id})">✕</button>
+        <button class="del-btn" onclick="deleteHabit(${h.id})"><i class="ti ti-x"></i></button>
       </div>
       <div class="slider-row">
         <input type="range" min="0" max="100" step="5" value="${pct}" id="slider-${h.id}"/>
       </div>
       <div class="slider-labels"><span>0%</span><span>50%</span><span>100%</span></div>
       <button class="notes-toggle" onclick="toggleNotes(${h.id})">
-        📝 <span id="nlabel-${h.id}">${note?'Ver nota':'Agregar nota'}</span>
+        <i class="ti ti-pencil"></i> <span id="nlabel-${h.id}">${note?'Ver nota':'Agregar nota'}</span>
       </button>
-      <textarea class="notes-area" id="notes-${h.id}" placeholder="Como te fue en este dia?" rows="2">${note}</textarea>
+      <textarea class="notes-area" id="notes-${h.id}" placeholder="Como te fue hoy?" rows="2">${note}</textarea>
     `;
     const slider=card.querySelector(`#slider-${h.id}`);
     const badge=card.querySelector(`#badge-${h.id}`);
@@ -386,15 +424,7 @@ function updateStats(){
   document.getElementById('stat-avg').textContent=avg+'%';
   document.getElementById('stat-count').textContent=state.habits.length+(state.habits.length===1?' habito':' habitos');
   document.getElementById('stat-week').textContent=getWeekAvg()+'%';
-  
-  let totalStreak=0;
-  for(let i=0; i<30; i++) {
-    const k = dateKey(daysAgo(i));
-    const dayAvg = getDayAvg(k);
-    if(dayAvg !== null && dayAvg >= 50) totalStreak++;
-    else if(k !== todayKey) break; 
-  }
-  document.getElementById('stat-streak').textContent='Racha: '+totalStreak+' dias';
+  document.getElementById('stat-streak').textContent='Racha: '+(state.streakDays||0)+' dias';
   const all100=vals.length>0&&vals.every(v=>v>=100);
   document.getElementById('congrats-box').style.display=all100?'block':'none';
 }
@@ -403,7 +433,7 @@ function deleteHabit(id){state.habits=state.habits.filter(h=>h.id!==id);save();r
 
 function addHabit(){
   const input=document.getElementById('habit-input');const name=input.value.trim();if(!name)return;
-  state.habits.push({id:state.nextId++,name,emoji:selectedEmoji});
+  state.habits.push({id:state.nextId++,name,emoji:selectedEmoji,streak:0,bestStreak:0});
   input.value='';save();renderHabits();
 }
 
